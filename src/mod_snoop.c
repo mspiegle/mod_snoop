@@ -27,21 +27,33 @@ capture_filter(ap_filter_t* f, apr_bucket_brigade* bb, ap_input_mode_t mode,
 	const char* buf;
 	apr_size_t br;
 
-	if (APR_SUCCESS == (ret = ap_get_brigade(f->next, bb, mode,
+	// we're only concerned with READBYTES
+	if (mode != AP_MODE_READBYTES) {
+		return ap_get_brigade(f->next, bb, mode, block, readbytes);
+	}
+
+	// go ahead and fetch the brigade - deal with errors
+	if (APR_SUCCESS != (ret = ap_get_brigade(f->next, bb, mode,
 	                                         block, readbytes))) {
-		for (b = APR_BRIGADE_FIRST(bb);
-		     b != APR_BRIGADE_SENTINEL(bb);
-		     b = APR_BUCKET_NEXT(b)) {
-			if (!(APR_BUCKET_IS_METADATA(b))) {
-				if (APR_SUCCESS == apr_bucket_read(b, &buf, &br, APR_BLOCK_READ)) {
-					printf("%s", buf);
-				}
+		return ret;
+	}
+
+	// if we got this far, then bb is populated
+	b = APR_BRIGADE_FIRST(bb);
+	const char* buf;
+	apr_size_t br;
+	while (b != APR_BRIGADE_SENTINEL(bb)) {
+		// show us the DATA
+		if (!APR_BUCKET_IS_METADATA(b)) {
+			if (APR_SUCCESS == apr_bucket_read(b, &buf, &br, APR_BLOCK_READ)) {
+				printf("%s", buf);
 			}
 		}
-	} else {
-		ap_log_error(APLOG_MARK, APLOG_ERR, 0, f->c->base_server,
-		             "mod_snoop: Problem calling ap_get_brigade()");
+
+		// load next bucket
+		b = APR_BUCKET_NEXT(b);
 	}
+
 	return APR_SUCCESS;
 }
 
