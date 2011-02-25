@@ -28,9 +28,6 @@ uninstall:
 	sudo rm -fv $(APACHE)/$(MODULE)
 
 run:
-	make clean
-	make
-	make install
 	#sudo gdb -d /home/mspiegle/tmp/httpd-source --args /usr/sbin/apache2 -X -D DEFAULT_VHOST -D INFO -D PROXY -d /usr/lib64/apache2 -f /etc/apache2/httpd.conf -k start
 	sudo gdb --args /usr/sbin/apache2 -X -D DEFAULT_VHOST -D INFO -D PROXY -d /usr/lib64/apache2 -f /etc/apache2/httpd.conf -k start
 	sudo killall apache2 2>&1 >/dev/null

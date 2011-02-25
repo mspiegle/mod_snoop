@@ -17,36 +17,39 @@
 #include <apr_pools.h>
 #include <util_filter.h>
 
-static const char capture_filter_name[] = "snoop";
+//static const char capture_filter_name[] = "snoop";
 
 static apr_status_t
 capture_filter(ap_filter_t* f, apr_bucket_brigade* bb, ap_input_mode_t mode,
                apr_read_type_e block, apr_off_t readbytes) {
-	apr_bucket* b;
-	apr_status_t ret;
-	const char* buf;
-	apr_size_t br;
 
+	printf("Inside capture_filter(%d, %d, %d)\n", mode, block, readbytes);
+	/*
 	// we're only concerned with READBYTES
 	if (mode != AP_MODE_READBYTES) {
 		return ap_get_brigade(f->next, bb, mode, block, readbytes);
 	}
+	*/
 
 	// go ahead and fetch the brigade - deal with errors
+	apr_status_t ret;
 	if (APR_SUCCESS != (ret = ap_get_brigade(f->next, bb, mode,
 	                                         block, readbytes))) {
 		return ret;
 	}
 
 	// if we got this far, then bb is populated
-	b = APR_BRIGADE_FIRST(bb);
 	const char* buf;
 	apr_size_t br;
+	apr_bucket* b;
+	b = APR_BRIGADE_FIRST(bb);
+	printf("Starting loop\n");
 	while (b != APR_BRIGADE_SENTINEL(bb)) {
+		printf("Doing another iteration\n");
 		// show us the DATA
 		if (!APR_BUCKET_IS_METADATA(b)) {
 			if (APR_SUCCESS == apr_bucket_read(b, &buf, &br, APR_BLOCK_READ)) {
-				printf("%s", buf);
+				printf("%s\n", buf);
 			}
 		}
 
@@ -60,7 +63,8 @@ capture_filter(ap_filter_t* f, apr_bucket_brigade* bb, ap_input_mode_t mode,
 static int
 pre_connection(conn_rec* c, void* csd) {
 	//ap_add_input_filter(capture_filter_name, NULL, NULL, c);
-	printf("*** Crazy ***");
+	ap_add_input_filter("SNOOP", NULL, NULL, c);
+	printf("*** pre_connection ***\n");
 	return OK;
 }
 
@@ -71,9 +75,10 @@ create_server_config(apr_pool_t* pool, server_rec* server) {
 
 static void
 register_hooks(apr_pool_t* pool) {
-	ap_register_input_filter(capture_filter_name, capture_filter, NULL,
-	                         AP_FTYPE_NETWORK);
+	ap_register_input_filter("SNOOP", capture_filter, NULL,
+	                         AP_FTYPE_CONNECTION);
 	ap_hook_pre_connection(pre_connection, NULL, NULL, APR_HOOK_MIDDLE);
+	printf("*** register_hooks ***\n");
 }
 
 static const
