@@ -51,6 +51,9 @@ capture_filter(ap_filter_t* f, apr_bucket_brigade* bb, ap_input_mode_t mode,
 
 		// create a bucket brigade
 		ctx->bb = apr_brigade_create(ctx->pool, f->c->bucket_alloc);
+
+		// set start
+		ctx->state = SNOOP_REQUEST_START;
 	}
 
 	// if we got this far, then we have bb data and a valid ctx
