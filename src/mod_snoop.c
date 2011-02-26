@@ -24,12 +24,10 @@ capture_filter(ap_filter_t* f, apr_bucket_brigade* bb, ap_input_mode_t mode,
                apr_read_type_e block, apr_off_t readbytes) {
 
 	printf("Inside capture_filter(%d, %d, %d)\n", mode, block, readbytes);
-	/*
-	// we're only concerned with READBYTES
-	if (mode != AP_MODE_READBYTES) {
+	// we're only concerned with AP_MODE_GETLINE
+	if (mode != AP_MODE_GETLINE) {
 		return ap_get_brigade(f->next, bb, mode, block, readbytes);
 	}
-	*/
 
 	// go ahead and fetch the brigade - deal with errors
 	apr_status_t ret;
@@ -38,7 +36,24 @@ capture_filter(ap_filter_t* f, apr_bucket_brigade* bb, ap_input_mode_t mode,
 		return ret;
 	}
 
-	// if we got this far, then bb is populated
+	// setup the filter ctx
+	snoop_filter_ctx_t* ctx;
+	if (NULL == f->ctx) {
+		// allocate ctx
+		f->ctx = ctx = apr_pcalloc(f->f->pool, sizeof(snoop_filter_ctx_t));
+
+		// create a subpool for the bb
+		apr_status_t ret;
+		if (APR_SUCCESS != (ret = apr_pool_create(&(ctx->pool), f->r->pool))) {
+			ap_log_error(APLOG_MARK, APLOG_WARNING, 0, f->r->server,
+			             "capture_filter(): couldn't create pool");
+		}
+
+		// create a bucket brigade
+		ctx->bb = apr_brigade_create(ctx->pool, f->c->bucket_alloc);
+	}
+
+	// if we got this far, then we have bb data and a valid ctx
 	const char* buf;
 	apr_size_t br;
 	apr_bucket* b;
@@ -49,7 +64,12 @@ capture_filter(ap_filter_t* f, apr_bucket_brigade* bb, ap_input_mode_t mode,
 		// show us the DATA
 		if (!APR_BUCKET_IS_METADATA(b)) {
 			if (APR_SUCCESS == apr_bucket_read(b, &buf, &br, APR_BLOCK_READ)) {
-				printf("%s\n", buf);
+				//printf("%s\n", buf);
+				// we should parse through the bucket until we find \r\n\r\n
+				int x = 0;
+				for (x = 0; x < br; x++) {
+					
+				}
 			}
 		}
 

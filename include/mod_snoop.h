@@ -7,5 +7,9 @@
 #ifndef _MOD_SNOOP_H_
 #define _MOD_SNOOP_H_
 
+typedef struct {
+	apr_pool_t* pool;
+	apr_bucket_brigade* bb;
+} snoop_filter_ctx_t;
 
 #endif
