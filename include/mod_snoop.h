@@ -10,6 +10,9 @@
 #include <apr_buckets.h>
 #include <apr_pools.h>
 
+//default port when no other is specified
+const apr_port_t snoop_default_port = 9876;
+
 typedef enum {
 	SNOOP_REQUEST_START,
 	SNOOP_WANT_KEY,
@@ -22,5 +25,9 @@ typedef struct {
 	apr_bucket_brigade* bb;
 	snoop_state_t state;
 } snoop_filter_ctx_t;
+
+typedef struct {
+	apr_sockaddr_t* target;
+} snoop_server_config_t;
 
 #endif

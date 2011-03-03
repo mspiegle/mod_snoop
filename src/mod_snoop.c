@@ -1,4 +1,5 @@
-/* 
+/*
+ *
  * mod_snoop.c - The main implementation of mod_snoop
  * Copyright (C) 2011 Michael Spiegle (mike@nauticaltech.com)
  *
@@ -17,13 +18,13 @@
 #include <apr_pools.h>
 #include <util_filter.h>
 
-//static const char capture_filter_name[] = "snoop";
+static const char capture_filter_name[] = "SNOOP";
 
 static apr_status_t
 capture_filter(ap_filter_t* f, apr_bucket_brigade* bb, ap_input_mode_t mode,
                apr_read_type_e block, apr_off_t readbytes) {
 
-	printf("Inside capture_filter(%d, %d, %d)\n", mode, block, readbytes);
+	printf("Inside capture_filter(%d, %d, %lu)\n", mode, block, readbytes);
 
 	//we're only concerned with AP_MODE_GETLINE
 	if (mode != AP_MODE_GETLINE) {
@@ -38,16 +39,17 @@ capture_filter(ap_filter_t* f, apr_bucket_brigade* bb, ap_input_mode_t mode,
 		printf("Allocating a ctx...\n");
 		f->ctx = ctx = apr_pcalloc(f->c->pool, sizeof(snoop_filter_ctx_t));
 
-		//create a subpool for the bb
+		//create a subpool for this filter
 		if (APR_SUCCESS != (ret = apr_pool_create(&(ctx->pool), f->c->pool))) {
-			ap_log_error(APLOG_MARK, APLOG_WARNING, 0, f->c->base_server,
+			ap_log_error(APLOG_MARK, APLOG_CRIT, 0, f->c->base_server,
 			             "capture_filter(): couldn't create pool");
+			return ret;
 		}
 
 		//create a bucket brigade
 		ctx->bb = apr_brigade_create(ctx->pool, f->c->bucket_alloc);
 
-		//set start
+		//set start state
 		ctx->state = SNOOP_REQUEST_START;
 	}
 
@@ -56,27 +58,32 @@ capture_filter(ap_filter_t* f, apr_bucket_brigade* bb, ap_input_mode_t mode,
 		return ap_get_brigade(f->next, bb, mode, block, readbytes);
 	}
 
-	//we have reason to believe that we should snoop this request.  do it.
+	//at this point, we have reason to believe that we should snoop this request
 	if (APR_SUCCESS != (ret = ap_get_brigade(f->next, bb, mode,
 	                                         block, readbytes))) {
+		ap_log_error(APLOG_MARK, APLOG_CRIT, 0, f->c->base_server,
+		             "capture_filter(): couldn't get brigade");
 		return ret;
 	}
 
 	//if we got this far, then we have bb data and a valid ctx
-	const char* buffer;
+	const char* bucket_data;
 	apr_size_t br;
 	apr_bucket* b;
 	b = APR_BRIGADE_FIRST(bb);
 	//iterate our incoming bucket brigade
 	while (b != APR_BRIGADE_SENTINEL(bb)) {
 		if (!APR_BUCKET_IS_METADATA(b)) {
-			if (APR_SUCCESS == apr_bucket_read(b, &buffer, &br, APR_BLOCK_READ)) {
+			if (APR_SUCCESS == apr_bucket_read(b, &bucket_data, &br,
+			                                   APR_BLOCK_READ)) {
 				//check to see if this is the end of the request
 				if (br == 2) {
-					if (0 == strncmp(buffer, "\r\n", 2)) {
+					if (0 == strncmp(bucket_data, "\r\n", 2)) {
 						//cleanup and ensure we don't run anymore
-						if (APR_SUCCESS != (ret = apr_brigade_pflatten(ctx->bb, &buffer,
-						                                               &br, f->c->pool))) {
+						char* brigade_data;
+						if (APR_SUCCESS != (ret = apr_brigade_pflatten(ctx->bb,
+						                                               &brigade_data,
+						                                               &br, ctx->pool))) {
 							ap_log_error(APLOG_MARK, APLOG_CRIT, 0, f->c->base_server,
 							             "capture_filter(): couldn't pflatten brigade");
 							return ret;
@@ -87,7 +94,7 @@ capture_filter(ap_filter_t* f, apr_bucket_brigade* bb, ap_input_mode_t mode,
 						if (APR_SUCCESS != (ret = apr_socket_create(&socket, APR_INET,
 						                                            SOCK_DGRAM,
 						                                            APR_PROTO_UDP,
-						                                            f->c->pool))) {
+						                                            ctx->pool))) {
 							ap_log_error(APLOG_MARK, APLOG_CRIT, 0, f->c->base_server,
 							             "capture_filter(): couldn't allocate socket");
 							return ret;
@@ -98,7 +105,7 @@ capture_filter(ap_filter_t* f, apr_bucket_brigade* bb, ap_input_mode_t mode,
 						if (APR_SUCCESS != (ret = apr_sockaddr_info_get(&target,
 						                                                "localhost",
 						                                                APR_UNSPEC, 9876,
-						                                                0, f->c->pool))) {
+						                                                0, ctx->pool))) {
 							ap_log_error(APLOG_MARK, APLOG_CRIT, 0, f->c->base_server,
 							             "capture_filter(): couldn't lookup target");
 							return ret;
@@ -106,7 +113,7 @@ capture_filter(ap_filter_t* f, apr_bucket_brigade* bb, ap_input_mode_t mode,
 
 						//send packet
 						if (APR_SUCCESS != (ret = apr_socket_sendto(socket, target, 0,
-						                                            buffer, &br))) {
+						                                            brigade_data, &br))) {
 							ap_log_error(APLOG_MARK, APLOG_CRIT, 0, f->c->base_server,
 							             "capture_filter(): couldn't send packet");
 							return ret;
@@ -125,7 +132,7 @@ capture_filter(ap_filter_t* f, apr_bucket_brigade* bb, ap_input_mode_t mode,
 					return ret;
 				}
 
-				if (APR_SUCCESS != (ret = apr_bucket_setaside(temp, f->c->pool))) {
+				if (APR_SUCCESS != (ret = apr_bucket_setaside(temp, ctx->pool))) {
 					ap_log_error(APLOG_MARK, APLOG_CRIT, 0, f->c->base_server,
 					             "capture_filter(): failed to setaside bucket");
 					return ret;
@@ -160,8 +167,41 @@ register_hooks(apr_pool_t* pool) {
 	ap_hook_pre_connection(pre_connection, NULL, NULL, APR_HOOK_MIDDLE);
 }
 
+static const char*
+config_server(cmd_parms* cmd, void* p, const char* arg) {
+	//get server config
+	snoop_server_config_t* conf;
+	conf = ap_get_module_config(cmd->server->module_config, &snoop_module);
+
+	//parse the argument which could be hostname:port, or just hostname
+	//we'll make a copy first because we may modify this string
+	char* buffer[64];
+	server = apr_cpystrn(buffer, arg, sizeof(buffer));
+
+	//iterate through the string looking for the hostname/port
+	char* h = buffer;
+	char* p = NULL;
+	while (*h != '\0') {
+		if (*h == ':') {
+			* = '\0';
+		}
+	}
+}
+
+static void*
+create_server_config(apr_pool_t* pool, server_rec* server) {
+	snoop_server_config_t* conf;
+	conf = apr_pcalloc(pool, sizeof(snoop_server_config_t));
+
+	conf->target = NULL;
+
+	return conf;
+}
+
 static const
 command_rec commands[] = {
+	AP_INIT_TAKE1("SnoopServer", config_server, NULL, RSRC_CONF,
+	              "Sets a server to send requests to"),
 	{ NULL }
 };
 
