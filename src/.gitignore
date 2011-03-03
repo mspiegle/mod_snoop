@@ -1,0 +1,6 @@
+.libs/
+mod_snoop.la
+mod_snoop.lo
+mod_snoop.o
+mod_snoop.slo
+mod_snoop.so
