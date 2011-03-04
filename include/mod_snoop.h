@@ -9,9 +9,14 @@
 
 #include <apr_buckets.h>
 #include <apr_pools.h>
+#include <httpd.h>
+#include <http_config.h>
 
-//default port when no other is specified
+//defaults
 const apr_port_t snoop_default_port = 9876;
+const char snoop_filter_name[] = "SNOOP";
+
+module AP_MODULE_DECLARE_DATA snoop_module;
 
 typedef enum {
 	SNOOP_REQUEST_START,
