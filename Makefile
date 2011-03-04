@@ -32,7 +32,7 @@ uninstall:
 	sudo rm -fv $(APACHE)/$(MODULE)
 
 run-debug:
-	sudo gdb --args /usr/sbin/apache2 -X -D DEFAULT_VHOST -D INFO -D PROXY -d /usr/lib64/apache2 -f /etc/apache2/httpd.conf -k start
+	sudo gdb -d ~/tmp/httpd-2.2.17/server -d ~/tmp/httpd-2.2.17/modules/http --args /usr/sbin/apache2 -X -D DEFAULT_VHOST -D INFO -D PROXY -d /usr/lib64/apache2 -f /etc/apache2/httpd.conf -k start
 	sudo killall apache2 2>&1 >/dev/null
 
 run-valgrind:
