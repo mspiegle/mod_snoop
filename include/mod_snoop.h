@@ -18,17 +18,9 @@ const char snoop_filter_name[] = "SNOOP";
 
 module AP_MODULE_DECLARE_DATA snoop_module;
 
-typedef enum {
-	SNOOP_REQUEST_START,
-	SNOOP_WANT_KEY,
-	SNOOP_WANT_VALUE,
-	SNOOP_REQUEST_END
-} snoop_state_t;
-
 typedef struct {
 	apr_pool_t* pool;
 	apr_bucket_brigade* bb;
-	snoop_state_t state;
 } snoop_filter_ctx_t;
 
 typedef struct {

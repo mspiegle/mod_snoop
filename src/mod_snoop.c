@@ -54,16 +54,6 @@ capture_filter(ap_filter_t* f, apr_bucket_brigade* bb, ap_input_mode_t mode,
 
 		//create a bucket brigade
 		ctx->bb = apr_brigade_create(ctx->pool, f->c->bucket_alloc);
-
-		//set start state
-		ctx->state = SNOOP_REQUEST_START;
-	}
-
-	//if we already processed the request, then move on
-	if (ctx->state == SNOOP_REQUEST_END) {
-		ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, f->c->base_server,
-		             "capture_filter(): already processed, returning");
-		return ap_get_brigade(f->next, bb, mode, block, readbytes);
 	}
 
 	//at this point, we have reason to believe that we should snoop this request
@@ -73,6 +63,7 @@ capture_filter(ap_filter_t* f, apr_bucket_brigade* bb, ap_input_mode_t mode,
 		             "capture_filter(): couldn't get brigade");
 		return ret;
 	}
+
 
 	//if we got this far, then we have bb data and a valid ctx
 	const char* bucket_data;
@@ -90,6 +81,8 @@ capture_filter(ap_filter_t* f, apr_bucket_brigade* bb, ap_input_mode_t mode,
 				if (br == 2) {
 					if (0 == strncmp(bucket_data, "\r\n", 2)) {
 						//cleanup and ensure we don't run anymore
+						ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, f->c->base_server,
+						             "capture_filter(): we found the end of the request");
 						char* brigade_data;
 						if (APR_SUCCESS != (ret = apr_brigade_pflatten(ctx->bb,
 						                                               &brigade_data,
@@ -118,7 +111,13 @@ capture_filter(ap_filter_t* f, apr_bucket_brigade* bb, ap_input_mode_t mode,
 							return ret;
 						}
 
-						ctx->state = SNOOP_REQUEST_END;
+						//we need to cleanup our ctx because it could get used for
+						//a keepalive request
+						ret = apr_brigade_cleanup(ctx->bb);
+						if (ret != APR_SUCCESS) {
+							ap_log_error(APLOG_MARK, APLOG_CRIT, 0, f->c->base_server,
+							             "capture_filter(): couldn't purge ctx->bb");
+						}
 						ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, f->c->base_server,
 						             "capture_filter(): finished snooping, returning");
 
@@ -140,6 +139,8 @@ capture_filter(ap_filter_t* f, apr_bucket_brigade* bb, ap_input_mode_t mode,
 					return ret;
 				}
 
+				ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, f->c->base_server,
+				             "capture_filter(): adding bucket to temp brigade");
 				APR_BRIGADE_INSERT_TAIL(ctx->bb, temp);
 			}
 		}
@@ -155,43 +156,26 @@ capture_filter(ap_filter_t* f, apr_bucket_brigade* bb, ap_input_mode_t mode,
 
 
 static const char*
-config_server(cmd_parms* cmd, void* p, const char* arg) {
+config_server(cmd_parms* cmd, void* p, const char* arg1, const char* arg2) {
 	//get server config
 	snoop_server_config_t* conf;
 	conf = ap_get_module_config(cmd->server->module_config, &snoop_module);
 
-	//parse the argument which could be hostname:port, or just hostname
-	//we'll make a copy first because we may modify this string
-	char server[64];
-	apr_cpystrn(server, arg, sizeof(server));
-
-	//iterate through the string looking for the hostname/port
-	char* iter = server;
+	//convert port to number
 	apr_port_t port = 0;
-	while (*iter != '\0') {
-		//if we find a :
-		if (*iter == ':') {
-			//break the string in 2
-			*iter = '\0';
-			//make sure the next character wouldn't be a null, the set the port
-			//to be the next character
-			if (*(iter + 1) != '\0') {
-				port = apr_atoi64(iter + 1);
-			}
-			break;
-		}
-		++iter;
-	}
+	port = apr_atoi64(arg2);
 
 	//if port is invalid, use default
 	if (port < 1 || port > 65535) {
 		port = snoop_default_port;
 	}
 
-	//assuming everything checks out, let's build an apr_sockaddr_t
+	//lets build an apr_sockaddr_t
+	//apr_sockaddr_info_get() does a hostname lookup for us, so we'll use it
+	//to validate that the hostname we got was valid
 	char message[128];
 	apr_status_t ret;
-	ret = apr_sockaddr_info_get(&(conf->target), server, APR_UNSPEC,
+	ret = apr_sockaddr_info_get(&(conf->target), arg1, APR_UNSPEC,
 	                            port, 0, cmd->pool);
 	if (ret != APR_SUCCESS) {
 		return apr_psprintf(cmd->pool, "config_server(): %s",
@@ -213,13 +197,14 @@ create_server_config(apr_pool_t* pool, server_rec* server) {
 
 static const
 command_rec commands[] = {
-	AP_INIT_TAKE1("SnoopServer", config_server, NULL, RSRC_CONF,
-	              "Sets a server to send requests to"),
+	AP_INIT_TAKE2("SnoopServer", config_server, NULL, RSRC_CONF,
+	              "Usage: SnoopServer hostname port"),
 	{ NULL }
 };
 
 static int
 pre_connection(conn_rec* c, void* csd) {
+	//this is the only way we can add our filter on a per-connection basis
 	ap_add_input_filter("SNOOP", NULL, NULL, c);
 	return OK;
 }
