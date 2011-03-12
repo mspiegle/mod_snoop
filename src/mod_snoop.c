@@ -41,6 +41,7 @@ capture_filter(ap_filter_t* f, apr_bucket_brigade* bb, ap_input_mode_t mode,
 	//setup the filter ctx
 	apr_status_t ret;
 	snoop_filter_ctx_t* ctx = f->ctx;
+	char message[128];
 	if (ctx == NULL) {
 		// allocate ctx
 		f->ctx = ctx = apr_pcalloc(f->c->pool, sizeof(snoop_filter_ctx_t));
@@ -54,16 +55,25 @@ capture_filter(ap_filter_t* f, apr_bucket_brigade* bb, ap_input_mode_t mode,
 
 		//create a bucket brigade
 		ctx->bb = apr_brigade_create(ctx->pool, f->c->bucket_alloc);
+
+		//create socket for later use
+		ret = apr_socket_create(&(ctx->socket), APR_INET, SOCK_DGRAM,
+                            APR_PROTO_UDP, ctx->pool);
+		if (ret != APR_SUCCESS) {	
+			ap_log_error(APLOG_MARK, APLOG_CRIT, 0, f->c->base_server,
+			             "capture_filter(): couldn't allocate udp socket");
+			return ret;
+		}
 	}
 
 	//at this point, we have reason to believe that we should snoop this request
 	if (APR_SUCCESS != (ret = ap_get_brigade(f->next, bb, mode,
 	                                         block, readbytes))) {
 		ap_log_error(APLOG_MARK, APLOG_CRIT, 0, f->c->base_server,
-		             "capture_filter(): couldn't get brigade");
+		             "capture_filter(): ap_get_brigade(): %s",
+		             apr_strerror(ret, message, sizeof(message)));
 		return ret;
 	}
-
 
 	//if we got this far, then we have bb data and a valid ctx
 	const char* bucket_data;
@@ -92,19 +102,9 @@ capture_filter(ap_filter_t* f, apr_bucket_brigade* bb, ap_input_mode_t mode,
 							return ret;
 						}
 
-						//get socket
-						apr_socket_t* socket;
-						if (APR_SUCCESS != (ret = apr_socket_create(&socket, APR_INET,
-						                                            SOCK_DGRAM,
-						                                            APR_PROTO_UDP,
-						                                            ctx->pool))) {
-							ap_log_error(APLOG_MARK, APLOG_CRIT, 0, f->c->base_server,
-							             "capture_filter(): couldn't allocate socket");
-							return ret;
-						}
-
 						//send packet
-						ret = apr_socket_sendto(socket, conf->target, 0, brigade_data, &br);
+						ret = apr_socket_sendto(ctx->socket, conf->target,
+						                        0, brigade_data, &br);
 						if (ret != APR_SUCCESS) {
 							ap_log_error(APLOG_MARK, APLOG_CRIT, 0, f->c->base_server,
 							             "capture_filter(): couldn't send packet");

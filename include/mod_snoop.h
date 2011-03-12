@@ -21,6 +21,7 @@ module AP_MODULE_DECLARE_DATA snoop_module;
 typedef struct {
 	apr_pool_t* pool;
 	apr_bucket_brigade* bb;
+	apr_socket_t* socket;
 } snoop_filter_ctx_t;
 
 typedef struct {
